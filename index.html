@@ -1,0 +1,313 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'">
+<title>Multi-Target Autoclicker</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Segoe UI, Arial, sans-serif; background: #f4f4f4; color: #222; }
+  .wrap { padding: 20px; max-width: 900px; margin: auto; }
+  h1 { margin: 0 0 4px; }
+  .sub { margin: 0 0 16px; color: #666; }
+  .panel { background: #fff; border: 1px solid #ddd; border-radius: 12px; padding: 16px; margin-bottom: 14px; }
+  .head, .row {
+    display: grid;
+    grid-template-columns: 28px 34px 1fr 1fr 1.2fr 105px 105px 70px 80px;
+    gap: 8px; align-items: center; margin-bottom: 8px;
+  }
+  .head { font-size: 12px; color: #777; font-weight: 600; }
+  input, select, button { font: inherit; border-radius: 8px; border: 1px solid #ccc; padding: 8px; background: #fff; min-width: 0; }
+  input[type=checkbox] { width: 18px; height: 18px; padding: 0; }
+  button { cursor: pointer; }
+  button:hover { background: #f0f0f0; }
+  .primary { background: #16803c; color: #fff; border-color: #16803c; }
+  .primary:hover { background: #136d33; }
+  .danger { background: #b00020; color: #fff; border-color: #b00020; }
+  .danger:hover { background: #930019; }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .spacer { flex: 1; }
+  .status { font-weight: bold; }
+  .on { color: #16803c; }
+  .off { color: #777; }
+  .msg { margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: #eef6ff; color: #124; display: none; }
+  .msg.error { background: #fdecee; color: #7a0014; }
+  .empty { color: #777; padding: 6px 0; }
+  .help { color: #444; line-height: 1.6; font-size: 14px; }
+  .hk { min-width: 140px; font-weight: 600; }
+  .hk.rec { background: #fff7d6; border-color: #d9a800; }
+  .hkrow { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+  kbd { background: #eee; border: 1px solid #ccc; border-radius: 4px; padding: 1px 6px; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Multi-Target Autoclicker</h1>
+  <p class="sub">Add screen positions and give each one its own click interval.</p>
+
+  <div class="panel">
+    <div class="controls">
+      <button id="start" class="primary">▶ Start</button>
+      <button id="stop" class="danger">■ Stop</button>
+      <span class="spacer"></span>
+      <span>Status: <span id="state" class="status off">Stopped</span></span>
+    </div>
+    <div id="msg" class="msg"></div>
+  </div>
+
+  <div class="panel">
+    <div class="controls" style="margin-bottom:12px">
+      <button id="add">+ Add target</button>
+      <button id="clear">Clear all</button>
+      <span class="spacer"></span>
+      <span style="color:#666;font-size:13px">Hover over a spot and press your <b>Add position</b> hotkey</span>
+    </div>
+    <div class="head">
+      <div></div><div>#</div><div>X</div><div>Y</div><div>Interval (ms)</div><div>Button</div><div>Click type</div><div></div><div></div>
+    </div>
+    <div id="targets"></div>
+    <div id="empty" class="empty">No targets yet. Click “Add target” or use the Add position hotkey over a spot on your screen.</div>
+  </div>
+
+  <div class="panel">
+    <b>Hotkeys</b> <span style="color:#666;font-size:13px">— click a box, then press the new key combo (Esc to cancel)</span>
+    <div class="hkrow" style="margin-top:10px">
+      <label>Start / Stop <button class="hk" id="hk-toggle"></button></label>
+      <label>Stop <button class="hk" id="hk-stop"></button></label>
+      <label>Add position <button class="hk" id="hk-capture"></button></label>
+      <button id="hk-reset">Reset</button>
+    </div>
+  </div>
+
+  <div class="panel help">
+    <b>How to use</b><br>
+    1. Add a target (button, or hover the spot and press the <b>Add position</b> hotkey).<br>
+    2. Or click <b>Pick</b> on a row, then move your mouse to the spot within 3 seconds.<br>
+    3. Set the interval in milliseconds (<b>1000 = 1 second</b>, minimum 50). Each target runs on its own timer.<br>
+    4. Choose Left/Right button and Single/Double click for each target.<br>
+    5. Use the hotkeys (they work even when this window is in the background). If a hotkey clashes with another program, change it in the Hotkeys box.
+  </div>
+</div>
+
+<script>
+const STORE_KEY = "multi-target-autoclicker.targets";
+const targetBox = document.getElementById("targets");
+const emptyMsg = document.getElementById("empty");
+const stateEl = document.getElementById("state");
+const msgEl = document.getElementById("msg");
+
+let rows = load();
+
+function load() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORE_KEY));
+    if (Array.isArray(saved)) return saved;
+  } catch (_) {}
+  return [];
+}
+
+function sync() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(rows)); } catch (_) {}
+  window.clicker.setTargets(rows);
+}
+
+function showMessage(text, isError) {
+  msgEl.textContent = text;
+  msgEl.className = "msg" + (isError ? " error" : "");
+  msgEl.style.display = text ? "block" : "none";
+}
+
+function newTarget(x = 0, y = 0) {
+  return { enabled: true, x, y, interval: 1000, button: "left", clicks: "single" };
+}
+
+function render() {
+  targetBox.innerHTML = "";
+  emptyMsg.style.display = rows.length ? "none" : "block";
+
+  rows.forEach((t, i) => {
+    const row = document.createElement("div");
+    row.className = "row";
+
+    const on = document.createElement("input");
+    on.type = "checkbox"; on.checked = t.enabled !== false;
+    on.onchange = () => { t.enabled = on.checked; sync(); };
+
+    const num = document.createElement("div");
+    num.textContent = "#" + (i + 1);
+
+    const x = document.createElement("input");
+    x.type = "number"; x.value = t.x;
+    x.oninput = () => { t.x = Number(x.value); sync(); };
+
+    const y = document.createElement("input");
+    y.type = "number"; y.value = t.y;
+    y.oninput = () => { t.y = Number(y.value); sync(); };
+
+    const interval = document.createElement("input");
+    interval.type = "number"; interval.min = "50"; interval.step = "50"; interval.value = t.interval;
+    interval.oninput = () => { t.interval = Number(interval.value); sync(); };
+    interval.onchange = () => {
+      t.interval = Math.max(50, Number(interval.value) || 1000);
+      interval.value = t.interval; sync();
+    };
+
+    const btn = document.createElement("select");
+    for (const [v, label] of [["left", "Left click"], ["right", "Right click"]]) {
+      const o = document.createElement("option");
+      o.value = v; o.textContent = label; btn.appendChild(o);
+    }
+    btn.value = t.button === "right" ? "right" : "left";
+    btn.onchange = () => { t.button = btn.value; sync(); };
+
+    const ct = document.createElement("select");
+    for (const [v, label] of [["single", "Single"], ["double", "Double"]]) {
+      const o = document.createElement("option");
+      o.value = v; o.textContent = label; ct.appendChild(o);
+    }
+    ct.value = t.clicks === "double" ? "double" : "single";
+    ct.onchange = () => { t.clicks = ct.value; sync(); };
+
+    const pick = document.createElement("button");
+    pick.textContent = "Pick";
+    pick.title = "Click, then move your mouse to the spot within 3 seconds";
+    pick.onclick = async () => {
+      pick.disabled = true;
+      for (let s = 3; s >= 1; s--) {
+        pick.textContent = s + "…";
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      const p = await window.clicker.getPosition();
+      if (p.ok) {
+        t.x = p.x; t.y = p.y;
+        x.value = p.x; y.value = p.y;
+        sync();
+        showMessage("Target #" + (i + 1) + " set to " + p.x + ", " + p.y);
+      } else {
+        showMessage(p.error, true);
+      }
+      pick.textContent = "Pick";
+      pick.disabled = false;
+    };
+
+    const remove = document.createElement("button");
+    remove.textContent = "Remove";
+    remove.onclick = () => { rows.splice(i, 1); sync(); render(); };
+
+    row.append(on, num, x, y, interval, btn, ct, pick, remove);
+    targetBox.appendChild(row);
+  });
+}
+
+document.getElementById("add").onclick = () => {
+  rows.push(newTarget());
+  sync(); render();
+};
+
+document.getElementById("clear").onclick = () => {
+  rows = []; sync(); render();
+};
+
+document.getElementById("start").onclick = async () => {
+  sync();
+  const r = await window.clicker.start();
+  if (!r.ok) showMessage(r.error, true);
+};
+
+document.getElementById("stop").onclick = () => window.clicker.stop();
+
+// F8 pressed anywhere: add a new target at the mouse position
+window.clicker.onCaptured((p) => {
+  rows.push(newTarget(p.x, p.y));
+  sync(); render();
+  showMessage("Added target #" + rows.length + " at " + p.x + ", " + p.y);
+});
+
+window.clicker.onState((on) => {
+  stateEl.textContent = on ? "Running" : "Stopped";
+  stateEl.className = "status " + (on ? "on" : "off");
+});
+
+window.clicker.onMessage((m) => showMessage(m.text, m.isError));
+
+/* ---------------- Hotkeys ---------------- */
+const HK_KEY = "multi-target-autoclicker.hotkeys";
+const HK_DEFAULT = { toggle: "Control+Alt+S", stop: "Control+Alt+X", capture: "Control+Alt+C" };
+let hotkeys = Object.assign({}, HK_DEFAULT);
+try { Object.assign(hotkeys, JSON.parse(localStorage.getItem(HK_KEY)) || {}); } catch (_) {}
+
+const hkButtons = {
+  toggle: document.getElementById("hk-toggle"),
+  stop: document.getElementById("hk-stop"),
+  capture: document.getElementById("hk-capture")
+};
+
+function pretty(a) { return a.replace("Control", "Ctrl"); }
+
+function showHotkeys() {
+  for (const k in hkButtons) hkButtons[k].textContent = pretty(hotkeys[k]);
+  document.getElementById("start").textContent = "▶ Start (" + pretty(hotkeys.toggle) + ")";
+  document.getElementById("stop").textContent = "■ Stop (" + pretty(hotkeys.stop) + ")";
+}
+
+async function applyHotkeys() {
+  try { localStorage.setItem(HK_KEY, JSON.stringify(hotkeys)); } catch (_) {}
+  showHotkeys();
+  const r = await window.clicker.setHotkeys(hotkeys);
+  if (!r.ok) {
+    showMessage("These hotkeys are already used by another program: " + r.failed.join(", ") + ". Pick a different combo.", true);
+  }
+}
+
+function keyName(e) {
+  const k = e.key;
+  if (["Control", "Shift", "Alt", "Meta"].includes(k)) return null;
+  if (/^F\d{1,2}$/.test(k)) return k;
+  if (k.length === 1) return k === " " ? "Space" : k.toUpperCase();
+  const map = { ArrowUp: "Up", ArrowDown: "Down", ArrowLeft: "Left", ArrowRight: "Right",
+                Escape: "Esc", Enter: "Enter", Tab: "Tab", Backspace: "Backspace",
+                Delete: "Delete", Insert: "Insert", Home: "Home", End: "End",
+                PageUp: "PageUp", PageDown: "PageDown" };
+  return map[k] || null;
+}
+
+for (const name in hkButtons) {
+  const btn = hkButtons[name];
+  btn.onclick = () => {
+    btn.textContent = "Press keys…";
+    btn.classList.add("rec");
+    const onKey = (e) => {
+      e.preventDefault();
+      if (e.key === "Escape") return done();
+      const key = keyName(e);
+      if (!key) return; // only modifiers so far
+      const parts = [];
+      if (e.ctrlKey) parts.push("Control");
+      if (e.altKey) parts.push("Alt");
+      if (e.shiftKey) parts.push("Shift");
+      parts.push(key);
+      hotkeys[name] = parts.join("+");
+      done();
+      applyHotkeys();
+    };
+    const done = () => {
+      window.removeEventListener("keydown", onKey, true);
+      btn.classList.remove("rec");
+      showHotkeys();
+    };
+    window.addEventListener("keydown", onKey, true);
+  };
+}
+
+document.getElementById("hk-reset").onclick = () => {
+  hotkeys = Object.assign({}, HK_DEFAULT);
+  applyHotkeys();
+};
+
+showHotkeys();
+applyHotkeys();
+sync();
+render();
+</script>
+</body>
+</html>

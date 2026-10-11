@@ -1,0 +1,13 @@
+{
+  "name": "multi-target-autoclicker",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Simple Windows multi-target autoclicker",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^38.0.0"
+  }
+}
